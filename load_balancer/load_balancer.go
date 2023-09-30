@@ -21,7 +21,7 @@ func logRequestDetails(next http.Handler) http.Handler {
 	})
 }
 
-func StartLoadBalancer() {
+func StartLoadBalancer(ports ...string) {
 	// Create a new HTTP server
 	server := http.Server{
 		Addr: ":8080",
