@@ -25,18 +25,20 @@ func logRequestDetails(next http.Handler) http.Handler {
 	})
 }
 
-func StartLoadBalancer(ports ...string) {
-	backends = ports
+func StartLoadBalancer(loadBalancerPort int, backendPort int, backendUrls ...string) {
+	// Populate the list of backends
+	backends = backendUrls
+
 	// Create a new HTTP server
 	server := http.Server{
-		Addr: ":8080",
+		Addr: fmt.Sprintf(":%d", loadBalancerPort),
 	}
 
 	http.Handle("/", logRequestDetails(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a new HTTP client
 		client := http.Client{}
-		resp, _ := client.Get(getbackendurl())
-		getbackendurl()
+		resp, _ := client.Get(getBackendUrl(backendPort))
+
 		// Read the response body into a string
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
@@ -54,8 +56,7 @@ func StartLoadBalancer(ports ...string) {
 	log.Fatal(server.ListenAndServe())
 }
 
-func getbackendurl() string {
+func getBackendUrl(backendPort int) string {
 	count = (count + 1) % len(backends)
-	fmt.Println(backends[count])
-	return "http://localhost:" + backends[count] + "/backend-" + backends[count]
+	return "http://localhost:" + fmt.Sprintf("%d", backendPort) + "/" + backends[count]
 }

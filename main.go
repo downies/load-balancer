@@ -8,9 +8,12 @@ import (
 func main() {
 	channel := make(chan int)
 
-	go dummy_backend.StartDummyBackend("7070")
-	go dummy_backend.StartDummyBackend("7071")
-	go load_balancer.StartLoadBalancer("7070", "7071")
+	backendPods := []string{"pod1", "pod2", "pod3"}
+	backendPort := 7070
+	loadBalancerPort := 80
+
+	go dummy_backend.StartDummyBackends(backendPort, backendPods...)
+	go load_balancer.StartLoadBalancer(loadBalancerPort, backendPort, backendPods...)
 
 	<-channel
 }
