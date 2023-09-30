@@ -12,8 +12,9 @@ func StartDummyBackend(port string) {
 		Addr: fmt.Sprint(":" + port),
 	}
 
-	http.Handle("/backend", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	http.Handle("/backend-"+port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("hello from backend running at: " + port))
+		fmt.Print("from be: " + port)
 	}))
 
 	// Start the server

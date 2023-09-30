@@ -7,6 +7,10 @@ import (
 	"net/http"
 )
 
+var backends []string
+
+var count int
+
 func logRequestDetails(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log the request details
@@ -22,6 +26,7 @@ func logRequestDetails(next http.Handler) http.Handler {
 }
 
 func StartLoadBalancer(ports ...string) {
+	backends = ports
 	// Create a new HTTP server
 	server := http.Server{
 		Addr: ":8080",
@@ -30,8 +35,8 @@ func StartLoadBalancer(ports ...string) {
 	http.Handle("/", logRequestDetails(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a new HTTP client
 		client := http.Client{}
-		resp, _ := client.Get("http://localhost:7070/backend")
-
+		resp, _ := client.Get(getbackendurl())
+		getbackendurl()
 		// Read the response body into a string
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
@@ -47,4 +52,10 @@ func StartLoadBalancer(ports ...string) {
 
 	// Start the server
 	log.Fatal(server.ListenAndServe())
+}
+
+func getbackendurl() string {
+	count = (count + 1) % len(backends)
+	fmt.Println(backends[count])
+	return "http://localhost:" + backends[count] + "/backend-" + backends[count]
 }
