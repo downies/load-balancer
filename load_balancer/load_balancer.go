@@ -5,9 +5,15 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"time"
 )
 
-var backends []string
+type backend struct {
+	healthy bool
+	url     string
+}
+
+var backends []backend
 
 var count int
 
@@ -25,10 +31,16 @@ func logRequestDetails(next http.Handler) http.Handler {
 	})
 }
 
-func StartLoadBalancer(loadBalancerPort int, backendPort int, backendUrls ...string) {
+func StartLoadBalancer(loadBalancerPort int, healthCheckPeriodInSeconds int, backendPort int, backendUrls ...string) {
 	// Populate the list of backends
-	backends = backendUrls
-
+	for _, url := range backendUrls {
+		newBackend := backend{
+			url:     url,
+			healthy: true,
+		}
+		backends = append(backends, newBackend)
+	}
+	go RunHealthCheck(healthCheckPeriodInSeconds)
 	// Create a new HTTP server
 	server := http.Server{
 		Addr: fmt.Sprintf(":%d", loadBalancerPort),
@@ -37,7 +49,9 @@ func StartLoadBalancer(loadBalancerPort int, backendPort int, backendUrls ...str
 	http.Handle("/", logRequestDetails(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a new HTTP client
 		client := http.Client{}
-		resp, _ := client.Get(getBackendUrl(backendPort))
+		url := getBackendUrl(backendPort)
+		fmt.Println(url)
+		resp, _ := client.Get(url)
 
 		// Read the response body into a string
 		body, err := ioutil.ReadAll(resp.Body)
@@ -56,7 +70,44 @@ func StartLoadBalancer(loadBalancerPort int, backendPort int, backendUrls ...str
 	log.Fatal(server.ListenAndServe())
 }
 
+func RunHealthCheck(healthCheckPeriodInSeconds int) {
+	for i, _ := range backends {
+		go runSchedule(i, healthCheckPeriodInSeconds)
+	}
+}
+
+func runSchedule(i int, healthCheckPeriodInSeconds int) {
+	for {
+		verifyHealthy(i)
+		time.Sleep(time.Duration(healthCheckPeriodInSeconds) * time.Second)
+	}
+}
+
+func verifyHealthy(i int) {
+
+	url := "http://localhost:" + "7070" + "/" + backends[i].url
+	method := "GET"
+
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, nil)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	status := res.StatusCode
+	if status != http.StatusOK {
+		fmt.Printf("removing pod: %s\n", backends[i].url)
+		backends[i].healthy = false
+	}
+}
+
 func getBackendUrl(backendPort int) string {
 	count = (count + 1) % len(backends)
-	return "http://localhost:" + fmt.Sprintf("%d", backendPort) + "/" + backends[count]
+	return "http://localhost:" + fmt.Sprintf("%d", backendPort) + "/" + backends[count].url
 }
