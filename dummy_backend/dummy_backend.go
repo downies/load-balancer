@@ -23,5 +23,6 @@ func StartDummyBackends(port int, urls ...string) {
 	}
 
 	// Start the server
+	fmt.Println("Serving dummy backends on port", port)
 	log.Fatal(server.ListenAndServe())
 }

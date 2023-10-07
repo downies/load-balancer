@@ -13,18 +13,18 @@ type backend struct {
 	url     string
 }
 
-var backends []backend
+var globalBackends []backend
 
 var count int
 
 func logRequestDetails(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Log the request details
-		fmt.Printf("Received request from %s\n", r.RemoteAddr)
-		fmt.Printf("%s %s %s\n", r.Method, r.URL, r.Proto)
-		fmt.Printf("Host: %s\n", r.Host)
-		fmt.Printf("User-Agent: %s\n", r.UserAgent())
-		fmt.Printf("Accept: %s\n\n", r.Header.Get("Accept"))
+		log.Printf("Received request from %s\n\n", r.RemoteAddr)
+		log.Printf("%s %s %s\n", r.Method, r.URL, r.Proto)
+		log.Printf("Host: %s\n", r.Host)
+		log.Printf("User-Agent: %s\n", r.UserAgent())
+		log.Printf("Accept: %s\n\n", r.Header.Get("Accept"))
 
 		// Call the next handler in the chain
 		next.ServeHTTP(w, r)
@@ -32,16 +32,14 @@ func logRequestDetails(next http.Handler) http.Handler {
 }
 
 func StartLoadBalancer(loadBalancerPort int, healthCheckPeriodInSeconds int, backendPort int, backendUrls ...string) {
-	// Populate the list of backends
-	for _, url := range backendUrls {
-		newBackend := backend{
-			url:     url,
-			healthy: true,
-		}
-		backends = append(backends, newBackend)
-	}
-	go RunHealthCheck(healthCheckPeriodInSeconds)
-	// Create a new HTTP server
+	populateBackends(backendUrls, backendPort)
+
+	go startHealthChecks(healthCheckPeriodInSeconds)
+
+	startLoadBalancer(loadBalancerPort, backendPort)
+}
+
+func startLoadBalancer(loadBalancerPort int, backendPort int) {
 	server := http.Server{
 		Addr: fmt.Sprintf(":%d", loadBalancerPort),
 	}
@@ -49,8 +47,8 @@ func StartLoadBalancer(loadBalancerPort int, healthCheckPeriodInSeconds int, bac
 	http.Handle("/", logRequestDetails(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Create a new HTTP client
 		client := http.Client{}
-		url := getBackendUrl(backendPort)
-		fmt.Println(url)
+		url := getBackendUrl()
+		log.Println(url)
 		resp, _ := client.Get(url)
 
 		// Read the response body into a string
@@ -66,48 +64,78 @@ func StartLoadBalancer(loadBalancerPort int, healthCheckPeriodInSeconds int, bac
 
 	})))
 
-	// Start the server
 	log.Fatal(server.ListenAndServe())
 }
 
-func RunHealthCheck(healthCheckPeriodInSeconds int) {
-	for i, _ := range backends {
-		go runSchedule(i, healthCheckPeriodInSeconds)
+func populateBackends(backendUrls []string, backendPort int) {
+	for _, url := range backendUrls {
+		newBackend := backend{
+			url:     fmt.Sprintf("http://localhost:" + fmt.Sprintf("%d", backendPort) + "/" + url),
+			healthy: true,
+		}
+		globalBackends = append(globalBackends, newBackend)
 	}
 }
 
-func runSchedule(i int, healthCheckPeriodInSeconds int) {
+func startHealthChecks(healthCheckPeriodInSeconds int) {
+	for i := range globalBackends {
+		go startScheduledHealthChecks(&globalBackends[i], healthCheckPeriodInSeconds)
+	}
+}
+
+func startScheduledHealthChecks(b *backend, healthCheckPeriodInSeconds int) {
 	for {
-		verifyHealthy(i)
+		verifyBackendHealthy(b)
 		time.Sleep(time.Duration(healthCheckPeriodInSeconds) * time.Second)
 	}
 }
 
-func verifyHealthy(i int) {
-
-	url := "http://localhost:" + "7070" + "/" + backends[i].url
+func verifyBackendHealthy(b *backend) {
+	url := b.url
 	method := "GET"
 
 	client := &http.Client{}
 	req, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 		return
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		fmt.Println(err)
+		markBackendHealthStatus(b, false)
 		return
 	}
 	status := res.StatusCode
-	if status != http.StatusOK {
-		fmt.Printf("removing pod: %s\n", backends[i].url)
-		backends[i].healthy = false
+	if status == http.StatusOK {
+		if !b.healthy {
+			markBackendHealthStatus(b, true)
+		}
+		return
+	}
+
+	if b.healthy {
+		markBackendHealthStatus(b, false)
 	}
 }
 
-func getBackendUrl(backendPort int) string {
-	count = (count + 1) % len(backends)
-	return "http://localhost:" + fmt.Sprintf("%d", backendPort) + "/" + backends[count].url
+func markBackendHealthStatus(b *backend, healthy bool) {
+	if healthy {
+		log.Printf("Backend %s is healthy again, adding back to the pool\n", b.url)
+	} else {
+		log.Printf("Backend %s is unhealthy, removing from the pool\n", b.url)
+	}
+	b.healthy = healthy
+}
+
+func getBackendUrl() string {
+	count = incrementCounter()
+	for !globalBackends[count].healthy {
+		count = incrementCounter()
+	}
+	return globalBackends[count].url
+}
+
+func incrementCounter() int {
+	return (count + 1) % len(globalBackends)
 }
